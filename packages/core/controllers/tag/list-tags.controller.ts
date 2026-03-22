@@ -34,7 +34,7 @@ export class ListTagsController {
       const results = await this.tagRepository.listTags({
         entityType,
         tagName,
-        limit: Number(limit),
+        limit: limit ? Number(limit) : undefined,
         options: {
           lastKey,
         },
@@ -50,8 +50,7 @@ export class ListTagsController {
       });
     } catch (error) {
       console.log({ error, errorContext });
-      c.status(httpStatus.INTERNAL_SERVER_ERROR);
-      return c.json({ message: error });
+      throw error;
     }
   });
 }
