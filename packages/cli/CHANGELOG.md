@@ -1,5 +1,53 @@
 # @monorise/cli
 
+## 4.0.0
+
+### Major Changes
+
+- e6a935f: Upgrade to SST v4
+
+  - Bumped `sst` peer dependency from `^3.16.3` to `4.7.3`
+  - Fixed internal type leak in `QFunction` that referenced `.sst/platform` paths
+  - Updated `examples/basic` to use SST v4 and the unified `monorise` package
+  - Added migration guide at `docs/MIGRATE-SST-V4.md`
+
+## 3.0.3
+
+### Patch Changes
+
+- b59075f: Fix combined package DTS rewriting and CLI monorepo detection
+
+  - build.js: Fix regex that missed rewriting some `@monorise/*` imports in `.d.ts` files (global regex `lastIndex` bug + missing double-quote patterns)
+  - cli: Add `detectCombinedPackage()` that walks up directory tree for monorepo hoisting support, and generate correct module augmentation based on detection
+
+## 3.0.3-dev.0
+
+### Patch Changes
+
+- b59075f: Fix combined package DTS rewriting and CLI monorepo detection
+
+  - build.js: Fix regex that missed rewriting some `@monorise/*` imports in `.d.ts` files (global regex `lastIndex` bug + missing double-quote patterns)
+  - cli: Add `detectCombinedPackage()` that walks up directory tree for monorepo hoisting support, and generate correct module augmentation based on detection
+
+## 3.0.2
+
+### Patch Changes
+
+- 7a29b6a: Add module augmentation for monorise/base combined package to fix type resolution
+- 7a29b6a: include handle @
+
+## 3.0.2-dev.1
+
+### Patch Changes
+
+- 37193cc: include handle @
+
+## 3.0.2-dev.0
+
+### Patch Changes
+
+- eeb410d: Add module augmentation for monorise/base combined package to fix type resolution
+
 ## 3.0.1
 
 ### Patch Changes

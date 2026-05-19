@@ -1,5 +1,72 @@
 # @monorise/react
 
+## 4.0.0
+
+### Minor Changes
+
+- b5a1fea: Add adjustEntity for atomic numeric updates on entity fields. Uses DynamoDB's native arithmetic expressions (SET field = field + delta) for race-condition-free concurrent writes. Useful for counters, accumulators, and real-time metrics.
+
+### Patch Changes
+
+- Updated dependencies [b5a1fea]
+  - @monorise/base@3.1.0
+
+## 3.0.6
+
+### Patch Changes
+
+- ca13559: Add limit param support to useEntities, with useState for stable tracking. Default params to { limit: 20 }. listMore respects the same limit. Add limit to CommonOptions for useMutuals and listMoreEntities.
+
+## 3.0.5
+
+### Patch Changes
+
+- eb14403: Add limit support to CommonOptions, listMoreEntities, and useEntities listMore for consistent pagination
+
+## 3.0.4
+
+### Patch Changes
+
+- 7a29b6a: Auto-populate mutual store on createEntity so useMutuals reflects new entities without refresh
+- 7a29b6a: Fix forceFetch option being ignored in useMutuals and useEntities hooks.
+
+  - `useMutuals`: The useEffect guard `!isFirstFetched` prevented refetching even when `forceFetch: true` was passed. Now checks `!isFirstFetched || opts?.forceFetch`.
+  - `useMutuals`: Added `refetch()` method to match useEntity, useEntities, and useTaggedEntities.
+  - `useEntities`: Same `!isFirstFetched` guard fix — now honors `forceFetch` option.
+
+- 7a29b6a: Auto-propagate entity state to mutual and tag stores on create, edit, and delete
+- Updated dependencies [7a29b6a]
+  - @monorise/base@3.0.2
+
+## 3.0.4-dev.3
+
+### Patch Changes
+
+- Updated dependencies [5d4b618]
+  - @monorise/base@3.0.2-dev.0
+
+## 3.0.4-dev.2
+
+### Patch Changes
+
+- d3568d3: Fix forceFetch option being ignored in useMutuals and useEntities hooks.
+
+  - `useMutuals`: The useEffect guard `!isFirstFetched` prevented refetching even when `forceFetch: true` was passed. Now checks `!isFirstFetched || opts?.forceFetch`.
+  - `useMutuals`: Added `refetch()` method to match useEntity, useEntities, and useTaggedEntities.
+  - `useEntities`: Same `!isFirstFetched` guard fix — now honors `forceFetch` option.
+
+## 3.0.4-dev.1
+
+### Patch Changes
+
+- 6602dc2: Auto-populate mutual store on createEntity so useMutuals reflects new entities without refresh
+
+## 3.0.4-dev.0
+
+### Patch Changes
+
+- 9ce08cc: Auto-propagate entity state to mutual and tag stores on create, edit, and delete
+
 ## 3.0.3
 
 ### Patch Changes

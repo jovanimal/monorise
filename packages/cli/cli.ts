@@ -5,6 +5,7 @@ import 'tsconfig-paths/register.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import chokidar from 'chokidar';
+import { detectCombinedPackage } from './commands/utils/detect-package';
 
 function kebabToCamel(str: string): string {
   return str.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
@@ -20,6 +21,7 @@ function kebabToPascal(kebab: string): string {
 async function generateConfigFile(
   configDir: string,
   monoriseOutputDir: string,
+  projectRoot: string,
 ): Promise<string> {
   const configOutputPath = path.join(monoriseOutputDir, 'config.ts');
   const initialConfigContent = `
@@ -91,6 +93,28 @@ export enum Entity {}
     }
   }
 
+  // Detect whether the consumer uses the combined 'monorise' package or scoped '@monorise/*' packages
+  const usesCombinedPackage = detectCombinedPackage(projectRoot);
+
+  // Build module augmentation block
+  const augmentationBlock = (moduleName: string) => `
+declare module '${moduleName}' {
+  export enum Entity {
+    ${enumEntries.join(',\n    ')}
+  }
+
+  ${typeEntries.join('\n  ')}
+
+  export interface EntitySchemaMap {
+    ${schemaMapEntries.join('\n    ')}
+  }
+}`;
+
+  // Augment the correct module based on which package is installed
+  const moduleAugmentations = usesCombinedPackage
+    ? augmentationBlock('monorise/base')
+    : augmentationBlock('@monorise/base');
+
   const configOutputContent = `
 import type { z } from 'zod';
 ${imports.join('\n')}
@@ -134,18 +158,7 @@ const config = {
 };
 
 export default config;
-
-declare module '@monorise/base' {
-  export enum Entity {
-    ${enumEntries.join(',\n    ')}
-  }
-
-  ${typeEntries.join('\n  ')}
-
-  export interface EntitySchemaMap {
-    ${schemaMapEntries.join('\n    ')}
-  }
-}
+${moduleAugmentations}
 `;
 
   fs.writeFileSync(configOutputPath, configOutputContent);
@@ -221,8 +234,12 @@ async function generateHandleFile(
   }
   // If customRoutesPath is not provided, routesImportLine remains empty and appHandlerPayload remains `{}`
 
+  // Detect whether the consumer uses the combined 'monorise' package or scoped '@monorise/*' packages
+  const usesCombinedPackage = detectCombinedPackage(projectRoot);
+  const coreImportPath = usesCombinedPackage ? 'monorise/core' : '@monorise/core';
+
   const combinedContent = `
-import CoreFactory from 'monorise/core';
+import CoreFactory from '${coreImportPath}';
 import config from './config';
 ${routesImportLine ? `${routesImportLine}\n` : ''}const coreFactory = new CoreFactory(config);
 
@@ -263,7 +280,7 @@ async function generateFiles(rootPath?: string): Promise<string> {
 
   fs.mkdirSync(monoriseOutputDir, { recursive: true });
 
-  await generateConfigFile(configDir, monoriseOutputDir);
+  await generateConfigFile(configDir, monoriseOutputDir, projectRoot);
   await generateHandleFile(monoriseConfig, projectRoot, monoriseOutputDir);
 
   return configDir;

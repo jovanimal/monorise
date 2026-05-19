@@ -58,7 +58,8 @@ const initCoreActions = (
     params: {
       skRange?: { start: string; end: string };
       all?: boolean;
-    } = {},
+      limit?: number;
+    } = { limit: 20 },
     opts: CommonOptions = {},
   ) => {
     const store = monoriseStore.getState();
@@ -86,7 +87,7 @@ const initCoreActions = (
     try {
       const { data: result } = await entityService.listEntities(
         {
-          ...(params?.all ? {} : { limit: 20 }),
+          ...(params?.all ? {} : { limit: params?.limit }),
           start: skRange?.start,
           end: skRange?.end,
         },
@@ -145,7 +146,7 @@ const initCoreActions = (
     try {
       const { data: result } = await entityService.listEntities(
         {
-          limit: 20,
+          limit: opts.limit ?? 20,
           lastKey,
         },
         opts,
@@ -421,6 +422,108 @@ const initCoreActions = (
       monoriseStore.setState(
         produce((state) => {
           state.entity[entityType].dataMap.set(data.entityId, data);
+
+          // auto-populate tag store based on entity config
+          const tagConfigs = state.config[entityType]?.tags;
+          if (tagConfigs) {
+            for (const tagConfig of tagConfigs) {
+              const { name, processor } = tagConfig;
+              const processorResults = processor(
+                data as CreatedEntity<Entity>,
+              );
+
+              for (const tagKey of Object.keys(state.tag)) {
+                const [tagEntityType, tagName, ...paramParts] =
+                  tagKey.split('/');
+
+                if (
+                  (tagEntityType as unknown as Entity) !== entityType ||
+                  tagName !== name
+                ) {
+                  continue;
+                }
+
+                if (!state.tag[tagKey]?.isFirstFetched) {
+                  continue;
+                }
+
+                // parse params from key
+                const keyParams: Record<string, string> = {};
+                for (const part of paramParts) {
+                  const colonIdx = part.indexOf(':');
+                  if (colonIdx > 0) {
+                    keyParams[part.substring(0, colonIdx)] =
+                      part.substring(colonIdx + 1);
+                  }
+                }
+
+                // skip query-filtered stores (can't match client-side)
+                if (keyParams.query) {
+                  continue;
+                }
+
+                // check if any processor result matches this tag store's params
+                const matches = processorResults.some((result) => {
+                  if (keyParams.group && result.group !== keyParams.group) {
+                    return false;
+                  }
+                  if (
+                    keyParams.start &&
+                    (!result.sortValue || result.sortValue < keyParams.start)
+                  ) {
+                    return false;
+                  }
+                  if (
+                    keyParams.end &&
+                    (!result.sortValue || result.sortValue > keyParams.end)
+                  ) {
+                    return false;
+                  }
+                  return true;
+                });
+
+                if (matches) {
+                  state.tag[tagKey].dataMap.set(data.entityId, data);
+                }
+              }
+            }
+          }
+
+          // auto-populate mutual store based on entity config
+          const mutualFields =
+            state.config[entityType]?.mutual?.mutualFields;
+          if (mutualFields) {
+            for (const [field, fieldConfig] of Object.entries(mutualFields)) {
+              const byEntityType = fieldConfig.entityType;
+              const ids = (entity as Record<string, any>)[field];
+              if (!Array.isArray(ids)) continue;
+
+              for (const byEntityId of ids) {
+                const mutualKey = getMutualStateKey(
+                  byEntityType,
+                  byEntityId,
+                  entityType,
+                );
+                if (
+                  state.mutual[mutualKey] &&
+                  state.mutual[mutualKey].isFirstFetched
+                ) {
+                  state.mutual[mutualKey].dataMap.set(data.entityId, {
+                    entityId: data.entityId,
+                    entityType,
+                    byEntityId,
+                    byEntityType,
+                    mutualId: '',
+                    data: data.data,
+                    mutualData: {},
+                    createdAt: data.createdAt,
+                    updatedAt: data.updatedAt,
+                    mutualUpdatedAt: data.updatedAt,
+                  });
+                }
+              }
+            }
+          }
         }),
         undefined,
         `mr/entity/create/${entityType}`,
@@ -493,12 +596,103 @@ const initCoreActions = (
               }
             }
           }
+
+          // update flipped mutual side (entity is the "by" entity)
+          for (const key of Object.keys(state.mutual)) {
+            const [_byEntity, _byId] = key.split('/');
+            if ((_byEntity as unknown as Entity) === entityType && _byId === id) {
+              const newDataMap = new Map(state.mutual[key].dataMap);
+              for (const [entryId, mutual] of newDataMap) {
+                newDataMap.set(entryId, { ...mutual, data: data.data });
+              }
+              state.mutual[key].dataMap = newDataMap;
+            }
+          }
+
+          // update tag store entries
+          for (const tagKey of Object.keys(state.tag)) {
+            const [tagEntityType] = tagKey.split('/');
+            if ((tagEntityType as unknown as Entity) === entityType) {
+              if (state.tag[tagKey]?.dataMap?.has(id)) {
+                state.tag[tagKey].dataMap.set(id, data);
+              }
+            }
+          }
         }),
         undefined,
         `mr/entity/edit/${entityType}/${id}`,
       );
       return { data };
     } catch (err) {
+      const error: Error & { originalError?: unknown } =
+        err instanceof Error ? err : new Error('Unknown error occurred');
+      onError(error);
+      return { error };
+    }
+  };
+
+  const adjustEntity = async <T extends Entity>(
+    entityType: T,
+    id: string,
+    adjustments: Record<string, number>,
+    opts: CommonOptions = {},
+  ) => {
+    const entityService = makeEntityService(entityType);
+    const onError = opts.onError ?? defaultOnError;
+
+    try {
+      const { data } = await entityService.adjustEntity(id, adjustments, opts);
+
+      // Update local store with server response
+      monoriseStore.setState(
+        produce((state) => {
+          state.entity[entityType].dataMap.set(data.entityId, data);
+
+          // Propagate to mutual stores
+          for (const key of Object.keys(state.mutual)) {
+            const [_byEntity, _byId, _entityType] = key.split('/');
+            if ((_entityType as unknown as Entity) === entityType) {
+              const mutual = state.mutual[key].dataMap.get(id);
+              if (mutual) {
+                state.mutual[key].dataMap = new Map(
+                  state.mutual[key].dataMap,
+                ).set(id, { ...(mutual as any), data: data.data });
+              }
+            }
+          }
+
+          for (const key of Object.keys(state.mutual)) {
+            const [_byEntity, _byId] = key.split('/');
+            if ((_byEntity as unknown as Entity) === entityType && _byId === id) {
+              const newDataMap = new Map(state.mutual[key].dataMap);
+              for (const [entryId, mutual] of newDataMap) {
+                newDataMap.set(entryId, { ...(mutual as any), data: data.data });
+              }
+              state.mutual[key].dataMap = newDataMap;
+            }
+          }
+
+          // Propagate to tag stores
+          for (const tagKey of Object.keys(state.tag)) {
+            const [tagEntityType] = tagKey.split('/');
+            if ((tagEntityType as unknown as Entity) === entityType) {
+              if (state.tag[tagKey]?.dataMap?.has(id)) {
+                state.tag[tagKey].dataMap.set(id, data);
+              }
+            }
+          }
+        }),
+        undefined,
+        `mr/entity/adjust/${entityType}/${id}`,
+      );
+
+      return { data };
+    } catch (err: any) {
+      // Constraint violated — refetch entity to get latest state
+      if (err?.response?.status === 409) {
+        await getEntity(entityType, id, { forceFetch: true });
+      }
+
       const error: Error & { originalError?: unknown } =
         err instanceof Error ? err : new Error('Unknown error occurred');
       onError(error);
@@ -527,6 +721,14 @@ const initCoreActions = (
             const [_byEntity, _byId, _entityType] = key.split('/');
             if ((_entityType as unknown as Entity) === entityType) {
               state.mutual[key].dataMap.delete(id);
+            }
+          }
+
+          // delete from tag store
+          for (const tagKey of Object.keys(state.tag)) {
+            const [tagEntityType] = tagKey.split('/');
+            if ((tagEntityType as unknown as Entity) === entityType) {
+              state.tag[tagKey]?.dataMap?.delete(id);
             }
           }
         }),
@@ -1220,7 +1422,8 @@ const initCoreActions = (
         end: string;
       };
       all?: boolean;
-    } = {},
+      limit?: number;
+    } = { limit: 20 },
     opts: CommonOptions & { searchInterval?: number } = {},
   ): {
     isLoading: boolean;
@@ -1248,6 +1451,7 @@ const initCoreActions = (
     const [query, setQuery] = useState<string>('');
     const [skRange, setBetween] = useState(params.skRange);
     const [all, setAll] = useState(params.all);
+    const [limit, setLimit] = useState(params.limit);
     const [isSearching, setIsSearching] = useState(false);
     const isLoading = isListing || isSearching;
 
@@ -1268,10 +1472,16 @@ const initCoreActions = (
     }, [all, params.all]);
 
     useEffect(() => {
-      if (!isFirstFetched) {
-        listEntities(entityType, { skRange, all }, opts);
+      if (params?.limit !== limit) {
+        setLimit(params.limit);
       }
-    }, [all, entityType, skRange, opts, isFirstFetched]);
+    }, [limit, params.limit]);
+
+    useEffect(() => {
+      if (!isFirstFetched || opts?.forceFetch) {
+        listEntities(entityType, { skRange, all, limit }, opts);
+      }
+    }, [all, entityType, skRange, opts, isFirstFetched, opts?.forceFetch, limit]);
 
     useEffect(() => {
       let queryTimeout: NodeJS.Timeout;
@@ -1344,6 +1554,7 @@ const initCoreActions = (
 
         await listMoreEntities(entityType, {
           ...opts,
+          limit,
           forceFetch: true,
         });
       },
@@ -1410,6 +1621,7 @@ const initCoreActions = (
     isFirstFetched?: boolean;
     lastKey?: string;
     listMore?: () => void;
+    refetch?: () => Promise<any>;
   } => {
     const stateKey = getMutualStateKey(
       byEntityType,
@@ -1435,7 +1647,7 @@ const initCoreActions = (
     const error = useErrorStore(requestKey);
 
     useEffect(() => {
-      if (!isFirstFetched && byEntityType && entityType && byId) {
+      if (byEntityType && entityType && byId && (!isFirstFetched || opts?.forceFetch)) {
         listEntitiesByEntity(
           byEntityType,
           entityType,
@@ -1477,6 +1689,21 @@ const initCoreActions = (
       error,
       isFirstFetched,
       lastKey,
+      refetch: async () => {
+        if (byEntityType && entityType && byId) {
+          return await listEntitiesByEntity(
+            byEntityType,
+            entityType,
+            byId,
+            {
+              ...opts,
+              forceFetch: true,
+              stateKey,
+            },
+            chainEntityQuery,
+          );
+        }
+      },
       ...(lastKey && {
         listMore: () => {
           if (byEntityType && entityType && byId) {
@@ -1622,6 +1849,7 @@ const initCoreActions = (
     upsertEntity,
     getEntity,
     editEntity,
+    adjustEntity,
     deleteEntity,
     getMutual,
     updateLocalEntity,
