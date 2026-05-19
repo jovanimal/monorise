@@ -1,5 +1,11 @@
 # @monorise/react
 
+## 4.0.1
+
+### Patch Changes
+
+- 3a32a60: Fix state modification for useTaggedEntities hook
+
 ## 4.0.0
 
 ### Minor Changes
